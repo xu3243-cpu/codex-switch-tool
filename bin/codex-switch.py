@@ -252,10 +252,14 @@ def backup_active(active_dir: Path, backup_dir: Path, label: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_path = backup_dir / f"{timestamp}-{label}"
     ensure_parent(backup_path)
-    for filename in PROFILE_FILES:
-        source_file = active_dir / filename
-        if source_file.is_file():
-            shutil.copy2(source_file, backup_path / filename)
+    # Copy auth file
+    auth_src = active_dir / AUTH_FILE
+    if auth_src.is_file():
+        shutil.copy2(auth_src, backup_path / AUTH_FILE)
+    # Copy config file if present (support config.json or config.toml)
+    cfg_src = find_config_file(active_dir)
+    if cfg_src is not None and cfg_src.is_file():
+        shutil.copy2(cfg_src, backup_path / cfg_src.name)
 
     backups = sorted(
         (path for path in backup_dir.iterdir() if path.is_dir()),
