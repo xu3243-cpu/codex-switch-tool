@@ -101,14 +101,14 @@ Use `--no-backup` if you do not want a backup copy.
 
 ## Profile discovery
 
-By default, the tool discovers profiles from `~/.codex-switch/sources/`.
-
-You can override that location with `--source-root`.
+By default, the tool discovers profiles from `~/.codex-switch/profiles/` and
+uses those directories as the canonical profile store. You can override that
+location with `--source-root`.
 
 Each subfolder becomes a profile automatically if it contains both files:
 
 ```text
-source-root/
+profiles/
   personal/
     auth.json
     config.toml
@@ -121,7 +121,7 @@ Then run:
 
 ```bash
 codex-switch list
-codex-switch import personal work
+codex-switch import personal work    # optional; import is a no-op if source==store
 codex-switch switch personal
 ```
 

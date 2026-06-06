@@ -19,7 +19,7 @@ except ImportError:
 
 DEFAULT_RUNTIME_ROOT = Path.home() / ".codex-switch"
 DEFAULT_ACTIVE_DIR = Path.home() / ".codex"
-DEFAULT_SOURCE_ROOT = DEFAULT_RUNTIME_ROOT / "sources"
+DEFAULT_SOURCE_ROOT = DEFAULT_RUNTIME_ROOT / "profiles"
 PROFILE_FILES = ("auth.json", "config.toml")
 
 
@@ -129,6 +129,13 @@ def copy_profile(source: Path, destination: Path) -> None:
 
 
 def import_profile(profile: ProfileInfo, refresh: bool = False) -> None:
+    # If the profile's source and store are the same directory (merged layout),
+    # there's nothing to copy.
+    try:
+        if profile.source.resolve() == profile.store.resolve():
+            return
+    except Exception:
+        pass
     if profile.store.is_dir() and not refresh:
         return
     copy_profile(profile.source, profile.store)
