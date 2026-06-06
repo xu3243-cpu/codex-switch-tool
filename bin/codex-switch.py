@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import sys
 import shutil
 from dataclasses import dataclass
@@ -20,7 +21,16 @@ except ImportError:
 DEFAULT_RUNTIME_ROOT = Path.home() / ".codex-switch"
 DEFAULT_ACTIVE_DIR = Path.home() / ".codex"
 DEFAULT_SOURCE_ROOT = DEFAULT_RUNTIME_ROOT / "profiles"
-PROFILE_FILES = ("auth.json", "config.toml")
+AUTH_FILE = "auth.json"
+CONFIG_CANDIDATES = ("config.json", "config.toml")
+
+
+def find_config_file(directory: Path) -> Path | None:
+    for name in CONFIG_CANDIDATES:
+        p = directory / name
+        if p.is_file():
+            return p
+    return None
 
 
 @dataclass(frozen=True)
@@ -116,7 +126,11 @@ def ensure_parent(path: Path) -> None:
 
 
 def require_profile_files(directory: Path) -> None:
-    missing = [name for name in PROFILE_FILES if not (directory / name).is_file()]
+    missing = []
+    if not (directory / AUTH_FILE).is_file():
+        missing.append(AUTH_FILE)
+    if find_config_file(directory) is None:
+        missing.append("config.json|config.toml")
     if missing:
         raise FileNotFoundError(f"Missing {', '.join(missing)} in {directory}")
 
@@ -124,8 +138,39 @@ def require_profile_files(directory: Path) -> None:
 def copy_profile(source: Path, destination: Path) -> None:
     require_profile_files(source)
     ensure_parent(destination)
-    for filename in PROFILE_FILES:
-        shutil.copy2(source / filename, destination / filename)
+    # copy auth.json
+    shutil.copy2(source / AUTH_FILE, destination / AUTH_FILE)
+
+    # handle config: prefer JSON merge for config.json, otherwise copy toml
+    src_config = find_config_file(source)
+    if src_config is None:
+        raise FileNotFoundError(f"No config file found in {source}")
+    dest_config = find_config_file(destination)
+
+    # If source is config.json, merge base_url into destination config.json if present
+    if src_config.name == "config.json":
+        if dest_config and dest_config.name == "config.json":
+            # merge base_url only
+            try:
+                src_data = json.loads(src_config.read_text())
+                dest_data = json.loads(dest_config.read_text())
+            except Exception:
+                # fallback to overwrite if parsing fails
+                shutil.copy2(src_config, destination / src_config.name)
+                return
+            if "base_url" in src_data:
+                dest_data["base_url"] = src_data["base_url"]
+                destination_file = destination / dest_config.name
+                destination_file.write_text(json.dumps(dest_data, indent=2, ensure_ascii=False))
+            else:
+                # nothing to merge; leave destination unchanged
+                pass
+        else:
+            # no dest json present, just copy source json
+            shutil.copy2(src_config, destination / src_config.name)
+    else:
+        # source is toml or other: copy it directly
+        shutil.copy2(src_config, destination / src_config.name)
 
 
 def import_profile(profile: ProfileInfo, refresh: bool = False) -> None:
@@ -150,14 +195,20 @@ def profile_digest(directory: Path) -> str | None:
     if not directory.is_dir():
         return None
     hasher = hashlib.sha256()
-    for filename in PROFILE_FILES:
-        file_path = directory / filename
-        if not file_path.is_file():
-            return None
-        hasher.update(filename.encode("utf-8"))
-        hasher.update(b"\0")
-        hasher.update(file_path.read_bytes())
-        hasher.update(b"\0")
+    auth_path = directory / AUTH_FILE
+    if not auth_path.is_file():
+        return None
+    hasher.update(AUTH_FILE.encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update(auth_path.read_bytes())
+    hasher.update(b"\0")
+    config_path = find_config_file(directory)
+    if config_path is None or not config_path.is_file():
+        return None
+    hasher.update(config_path.name.encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update(config_path.read_bytes())
+    hasher.update(b"\0")
     return hasher.hexdigest()
 
 
