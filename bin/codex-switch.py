@@ -54,9 +54,21 @@ def extract_base_url(path: Path) -> str | None:
 
 def update_toml_base_url(path: Path, new_value: str) -> None:
     text = path.read_text()
-    if re.search(r"^\s*base_url\s*=", text, flags=re.MULTILINE):
-        # Replace existing base_url line; accept optionally-escaped quotes
-        new_text = re.sub(r"(^\s*base_url\s*=\s*)(?:\\?[\"']).*?(?:\\?[\"'])", r"\1\"" + new_value + "\"", text, flags=re.MULTILINE)
+    # Normalize any existing escaped quotes inside the base_url value, then
+    # replace the inner value with the provided new_value and write a clean
+    # double-quoted line (no backslash escapes).
+    pattern = re.compile(r"(^\s*base_url\s*=\s*)(?:\\?[\"'])(.*?)(?:\\?[\"'])", flags=re.MULTILINE)
+
+    def _normalize_and_replace(m: re.Match) -> str:
+        prefix = m.group(1)
+        inner = m.group(2)
+        # unescape any escaped quotes inside
+        inner = inner.replace('\\"', '"').replace("\\'", "'")
+        # return new clean quoted line with new_value
+        return f"{prefix}\"{new_value}\""
+
+    if pattern.search(text):
+        new_text = pattern.sub(_normalize_and_replace, text)
     else:
         new_text = text.rstrip() + "\nbase_url = \"" + new_value + "\"\n"
     path.write_text(new_text)
