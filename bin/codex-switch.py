@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import shutil
 from dataclasses import dataclass
@@ -31,6 +32,30 @@ def find_config_file(directory: Path) -> Path | None:
         if p.is_file():
             return p
     return None
+
+
+def extract_base_url(path: Path) -> str | None:
+    try:
+        if path.name.endswith(".json"):
+            data = json.loads(path.read_text())
+            return data.get("base_url")
+        # TOML-like: simple regex to find base_url = "..."
+        text = path.read_text()
+        m = re.search(r"^\s*base_url\s*=\s*[\"'](.*?)[\"']", text, flags=re.MULTILINE)
+        if m:
+            return m.group(1)
+    except Exception:
+        return None
+    return None
+
+
+def update_toml_base_url(path: Path, new_value: str) -> None:
+    text = path.read_text()
+    if re.search(r"^\s*base_url\s*=", text, flags=re.MULTILINE):
+        new_text = re.sub(r"(^\s*base_url\s*=\s*)[\"'].*?[\"']", r"\1\"" + new_value + "\"", text, flags=re.MULTILINE)
+    else:
+        new_text = text.rstrip() + "\nbase_url = \"" + new_value + "\"\n"
+    path.write_text(new_text)
 
 
 @dataclass(frozen=True)
@@ -147,29 +172,30 @@ def copy_profile(source: Path, destination: Path) -> None:
         raise FileNotFoundError(f"No config file found in {source}")
     dest_config = find_config_file(destination)
 
-    # If source is config.json, merge base_url into destination config.json if present
-    if src_config.name == "config.json":
-        if dest_config and dest_config.name == "config.json":
-            # merge base_url only
-            try:
-                src_data = json.loads(src_config.read_text())
-                dest_data = json.loads(dest_config.read_text())
-            except Exception:
-                # fallback to overwrite if parsing fails
-                shutil.copy2(src_config, destination / src_config.name)
-                return
-            if "base_url" in src_data:
-                dest_data["base_url"] = src_data["base_url"]
-                destination_file = destination / dest_config.name
-                destination_file.write_text(json.dumps(dest_data, indent=2, ensure_ascii=False))
+    # Merge base_url when possible; otherwise copy source config file.
+    src_base = extract_base_url(src_config)
+    if dest_config and dest_config.is_file():
+        # If we have a base_url in the source, update destination's base_url
+        if src_base is not None:
+            if dest_config.name.endswith(".json"):
+                try:
+                    dest_data = json.loads(dest_config.read_text())
+                    dest_data["base_url"] = src_base
+                    dest_config.write_text(json.dumps(dest_data, indent=2, ensure_ascii=False))
+                except Exception:
+                    # fallback to overwrite
+                    shutil.copy2(src_config, destination / src_config.name)
             else:
-                # nothing to merge; leave destination unchanged
-                pass
+                # dest is toml-like: update or append base_url line
+                try:
+                    update_toml_base_url(dest_config, src_base)
+                except Exception:
+                    shutil.copy2(src_config, destination / src_config.name)
         else:
-            # no dest json present, just copy source json
-            shutil.copy2(src_config, destination / src_config.name)
+            # no base_url in source: do nothing to destination
+            pass
     else:
-        # source is toml or other: copy it directly
+        # no destination config exists: copy source config as-is
         shutil.copy2(src_config, destination / src_config.name)
 
 
