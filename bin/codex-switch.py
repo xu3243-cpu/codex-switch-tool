@@ -39,11 +39,14 @@ def extract_base_url(path: Path) -> str | None:
         if path.name.endswith(".json"):
             data = json.loads(path.read_text())
             return data.get("base_url")
-        # TOML-like: simple regex to find base_url = "..."
+        # TOML-like: handle lines like `base_url = "..."` or `base_url = '...'`
         text = path.read_text()
-        m = re.search(r"^\s*base_url\s*=\s*[\"'](.*?)[\"']", text, flags=re.MULTILINE)
+        # Accept optionally-escaped quotes (e.g. \"https://...\") and capture inner value
+        m = re.search(r"^\s*base_url\s*=\s*(?:\\?[\"'])(.*?)(?:\\?[\"'])", text, flags=re.MULTILINE)
         if m:
-            return m.group(1)
+            val = m.group(1)
+            # Normalize by removing any backslash escapes around quotes inside value
+            return val.replace('\\"', '"').replace("\\'", "'")
     except Exception:
         return None
     return None
@@ -52,7 +55,8 @@ def extract_base_url(path: Path) -> str | None:
 def update_toml_base_url(path: Path, new_value: str) -> None:
     text = path.read_text()
     if re.search(r"^\s*base_url\s*=", text, flags=re.MULTILINE):
-        new_text = re.sub(r"(^\s*base_url\s*=\s*)[\"'].*?[\"']", r"\1\"" + new_value + "\"", text, flags=re.MULTILINE)
+        # Replace existing base_url line; accept optionally-escaped quotes
+        new_text = re.sub(r"(^\s*base_url\s*=\s*)(?:\\?[\"']).*?(?:\\?[\"'])", r"\1\"" + new_value + "\"", text, flags=re.MULTILINE)
     else:
         new_text = text.rstrip() + "\nbase_url = \"" + new_value + "\"\n"
     path.write_text(new_text)
